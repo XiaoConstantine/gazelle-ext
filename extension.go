@@ -2,6 +2,7 @@ package gazelle_ext
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"flag"
 	"log"
@@ -143,7 +144,8 @@ func (e *Extension) Loads() []rule.LoadInfo {
 // Any non-fatal errors this function encounters should be logged using
 // log.Print.
 
-const testFile = "test.java"
+//go:embed analysis.scm
+var analysisQuery []byte
 
 func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateResult {
 
@@ -179,7 +181,7 @@ func javaSourceFile(f string) bool {
 }
 
 func (e *Extension) getTreeSitterJavaFileLoads(path string) ([]string, error) {
-	f, err := os.ReadFile(testFile)
+	f, err := os.ReadFile(path)
 
 	if err != nil {
 		return nil, errors.New("error opening file")
@@ -191,7 +193,7 @@ func (e *Extension) getTreeSitterJavaFileLoads(path string) ([]string, error) {
 		return nil, errors.New("parse tree error")
 	}
 
-	q, err := sitter.NewQuery([]byte("(import_declaration) @n"), java.GetLanguage())
+	q, err := sitter.NewQuery(analysisQuery, java.GetLanguage())
 	if err != nil {
 		return nil, errors.New("query init failure")
 	}

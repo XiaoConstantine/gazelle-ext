@@ -1,6 +1,7 @@
 package gazelle_ext
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/bazelbuild/bazel-gazelle/language"
@@ -18,7 +19,14 @@ func TestExtension(t *testing.T) {
 	})
 
 	t.Run("parse", func(t *testing.T) {
-		lang.GenerateRules(language.GenerateArgs{})
+		got := lang.GenerateRules(language.GenerateArgs{RegularFiles: []string{"test.java"}})
+
+		want := language.GenerateResult{}
+
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("got %+v, want %+v", got, want)
+		}
+
 	})
 
 }
