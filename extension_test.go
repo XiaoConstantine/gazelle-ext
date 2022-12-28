@@ -4,7 +4,11 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/bazelbuild/bazel-gazelle/config"
+	"github.com/bazelbuild/bazel-gazelle/label"
 	"github.com/bazelbuild/bazel-gazelle/language"
+	"github.com/bazelbuild/bazel-gazelle/repo"
+	"github.com/bazelbuild/bazel-gazelle/resolve"
 )
 
 func TestExtension(t *testing.T) {
@@ -24,9 +28,18 @@ func TestExtension(t *testing.T) {
 		want := language.GenerateResult{}
 
 		if !reflect.DeepEqual(got, want) {
-			t.Errorf("got %+v, want %+v", got, want)
+			t.Errorf("got %#v, want %+v", got, want)
 		}
 
+	})
+
+	t.Run("resolve", func(t *testing.T) {
+		ret := lang.GenerateRules(language.GenerateArgs{RegularFiles: []string{"test.java"}})
+
+		for i, r := range ret.Gen {
+			lang.Resolve(config.New().Clone(), &resolve.RuleIndex{}, &repo.RemoteCache{}, r, ret.Imports[i], label.New("", "", r.Name()))
+
+		}
 	})
 
 }

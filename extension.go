@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/bazelbuild/bazel-gazelle/config"
@@ -102,7 +103,56 @@ func (e *Extension) Embeds(r *rule.Rule, from label.Label) []label.Label {
 // the appropriate language-specific equivalent) for each import according to
 // language-specific rules and heuristics.
 func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.RemoteCache, r *rule.Rule, imports interface{}, from label.Label) {
-	panic("not implemented") // TODO: Implement
+	imps := imports.([]string)
+	r.DelAttr("deps")
+	if len(imps) == 0 {
+		return
+	}
+
+	deps := make([]string, 0, len(imps))
+
+	for _, imp := range imps {
+		impLabel, err := label.Parse(imp)
+		if err != nil {
+			log.Printf("%s: import of %q is invalid: %v", from.String(), imp, err)
+			continue
+		}
+
+		impLabel = impLabel.Abs(from.Repo, from.Pkg)
+
+		if impLabel.Repo != "" || !c.IndexLibraries {
+			// This is a dependency that is external to the current repo, or indexing
+			// is disabled so take a guess at what hte target name should be.
+			deps = append(deps, strings.TrimSuffix(imp, fileType))
+			continue
+		}
+
+		res := resolve.ImportSpec{
+			Lang: languageName,
+			Imp:  impLabel.String(),
+		}
+		matches := ix.FindRulesByImportWithConfig(c, res, languageName)
+
+		if len(matches) == 0 {
+			log.Printf(
+				"%s: %q (%s) was not found in dependency index. Skipping. This may result in an incomplete deps section and require manual BUILD file intervention.\n",
+				from.String(),
+				imp,
+				impLabel.String(),
+			)
+		}
+
+		for _, m := range matches {
+			depLabel := m.Label
+			depLabel = depLabel.Rel(from.Repo, from.Pkg)
+			deps = append(deps, depLabel.String())
+		}
+	}
+	sort.Strings(deps)
+	if len(deps) > 0 {
+		r.SetAttr("deps", deps)
+	}
+
 }
 
 var kinds = map[string]rule.KindInfo{
@@ -208,6 +258,10 @@ func (e *Extension) getTreeSitterJavaFileLoads(path string) ([]string, error) {
 		}
 
 		for _, c := range m.Captures {
+			// Deal with imports for now
+			if q.CaptureNameForId(c.Index) != "import" {
+				continue
+			}
 			log.Printf("%s", c.Node.Content(f))
 			ret = append(ret, c.Node.Content(f))
 		}

@@ -1,5 +1,5 @@
 ; package
-(package_declaration)@package
+(package_declaration) @package
 
 
 ; imports
