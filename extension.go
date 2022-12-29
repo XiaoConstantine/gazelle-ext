@@ -24,6 +24,7 @@ import (
 const (
 	languageName = "java"
 	fileType     = ".java"
+	packagesKey  = "_java_packages"
 )
 
 type Extension struct {
@@ -79,13 +80,31 @@ func (e *Extension) Name() string {
 	return languageName
 }
 
+func javaLibrary(name string) bool {
+	return name == "java_library"
+}
+
 // Imports returns a list of ImportSpecs that can be used to import the rule
 // r. This is used to populate RuleIndex.
 //
 // If nil is returned, the rule will not be indexed. If any non-nil slice is
 // returned, including an empty slice, the rule will be indexed.
 func (e *Extension) Imports(c *config.Config, r *rule.Rule, f *rule.File) []resolve.ImportSpec {
-	panic("not implemented") // TODO: Implement
+	log.Println("calling imports")
+	if !javaLibrary(r.Kind()) {
+		return nil
+	}
+	var out []resolve.ImportSpec
+	log.Printf("%#v", r)
+
+	if pkgs := r.PrivateAttr(packagesKey); pkgs != nil {
+		for _, pkg := range pkgs.([]string) {
+			out = append(out, resolve.ImportSpec{Lang: languageName, Imp: pkg})
+		}
+
+	}
+	log.Printf("Out %#v", out)
+	return out
 }
 
 // Embeds returns a list of labels of rules that the given rule embeds. If
@@ -93,6 +112,7 @@ func (e *Extension) Imports(c *config.Config, r *rule.Rule, f *rule.File) []reso
 // the embedding rule will be indexed. The embedding rule will inherit
 // the imports of the embedded rule.
 func (e *Extension) Embeds(r *rule.Rule, from label.Label) []label.Label {
+	log.Println("calling embeds")
 	panic("not implemented") // TODO: Implement
 }
 
@@ -103,15 +123,21 @@ func (e *Extension) Embeds(r *rule.Rule, from label.Label) []label.Label {
 // the appropriate language-specific equivalent) for each import according to
 // language-specific rules and heuristics.
 func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.RemoteCache, r *rule.Rule, imports interface{}, from label.Label) {
+	log.Println("calling resolve")
 	imps := imports.([]string)
 	r.DelAttr("deps")
 	if len(imps) == 0 {
+		log.Println("empty imports")
 		return
 	}
-
 	deps := make([]string, 0, len(imps))
 
 	for _, imp := range imps {
+		// Skip built-in dependencies
+		if strings.HasPrefix(imp, "import java.") {
+			continue
+		}
+
 		impLabel, err := label.Parse(imp)
 		if err != nil {
 			log.Printf("%s: import of %q is invalid: %v", from.String(), imp, err)
@@ -119,6 +145,7 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 		}
 
 		impLabel = impLabel.Abs(from.Repo, from.Pkg)
+		log.Printf("%v", impLabel)
 
 		if impLabel.Repo != "" || !c.IndexLibraries {
 			// This is a dependency that is external to the current repo, or indexing
@@ -148,6 +175,7 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 			deps = append(deps, depLabel.String())
 		}
 	}
+	log.Printf("Deps: %#v", deps)
 	sort.Strings(deps)
 	if len(deps) > 0 {
 		r.SetAttr("deps", deps)
@@ -198,6 +226,10 @@ func (e *Extension) Loads() []rule.LoadInfo {
 var analysisQuery []byte
 
 func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateResult {
+	log.Println("calling generateRules")
+
+	workspaceRoot := args.Config.RepoRoot
+	log.Printf("%#v", workspaceRoot)
 
 	var rules []*rule.Rule
 	var imports []interface{}
@@ -212,6 +244,7 @@ func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateR
 
 		r.SetAttr("srcs", []string{f})
 		fullPath := filepath.Join(args.Dir, f)
+		log.Printf("%#v", fullPath)
 		loads, err := e.getTreeSitterJavaFileLoads(fullPath)
 		if err != nil {
 			log.Printf("%s: contains syntax errors: %v", fullPath, err)
@@ -262,7 +295,6 @@ func (e *Extension) getTreeSitterJavaFileLoads(path string) ([]string, error) {
 			if q.CaptureNameForId(c.Index) != "import" {
 				continue
 			}
-			log.Printf("%s", c.Node.Content(f))
 			ret = append(ret, c.Node.Content(f))
 		}
 	}
