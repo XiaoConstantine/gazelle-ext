@@ -22,9 +22,13 @@ import (
 )
 
 const (
-	languageName = "java"
-	fileType     = ".java"
-	packagesKey  = "_java_packages"
+	languageName  = "java"
+	fileType      = ".java"
+	packagesKey   = "_java_packages"
+	full_package  = "full_package"
+	local_package = "local_package"
+	full_import   = "full_import"
+	class_name    = "class_name"
 )
 
 type Extension struct {
@@ -228,8 +232,8 @@ var analysisQuery []byte
 func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateResult {
 	log.Println("calling generateRules")
 
-	workspaceRoot := args.Config.RepoRoot
-	log.Printf("%#v", workspaceRoot)
+	// workspaceRoot := args.Config.RepoRoot
+	// log.Printf("%#v", workspaceRoot)
 
 	var rules []*rule.Rule
 	var imports []interface{}
@@ -263,7 +267,23 @@ func javaSourceFile(f string) bool {
 	return strings.HasSuffix(f, fileType)
 }
 
-func (e *Extension) getTreeSitterJavaFileLoads(path string) ([]string, error) {
+type javaFile struct {
+	pkg      string
+	deps     map[string][]string
+	full_pkg string
+}
+
+// The query will provide us information (if parse succeed) as following format:
+// package a.b.(c)
+// import a.b.(c)
+// import a.(*)
+// the parsing result looks like:
+// { pkg: c
+//   full_pkg: a.b.c
+//   deps: {a.b: [c]}
+//  }
+//
+func (e *Extension) getTreeSitterJavaFileLoads(path string) (*javaFile, error) {
 	f, err := os.ReadFile(path)
 
 	if err != nil {
@@ -283,22 +303,40 @@ func (e *Extension) getTreeSitterJavaFileLoads(path string) ([]string, error) {
 	qc := sitter.NewQueryCursor()
 	qc.Exec(q, tree.RootNode())
 
-	var ret []string
+	var full_pkg, pkg string
+	var imports []string
+	deps := make(map[string][]string)
 	for {
 		m, ok := qc.NextMatch()
 		if !ok {
 			break
 		}
-
 		for _, c := range m.Captures {
-			// Deal with imports for now
-			if q.CaptureNameForId(c.Index) != "import" {
-				continue
+			switch q.CaptureNameForId(c.Index) {
+			case full_package:
+				full_pkg = c.Node.Content(f)[7:]
+			case full_import:
+				imports = append(imports, strings.TrimSuffix(c.Node.Content(f)[6:], ";"))
+			case class_name:
+				clsName := c.Node.Content(f)
+				if len(imports) > 0 && strings.HasSuffix(imports[len(imports)-1], clsName) {
+					prev := imports[len(imports)-1]
+					key := strings.TrimSuffix(prev[:len(prev)-len(clsName)], ".")
+					deps[key] = append(deps[key], clsName)
+				}
+			case local_package:
+				pkg = c.Node.Content(f)
 			}
-			ret = append(ret, c.Node.Content(f))
 		}
 	}
-	return ret, nil
+
+	item := &javaFile{
+		pkg:      pkg,
+		full_pkg: full_pkg,
+		deps:     deps,
+	}
+	log.Printf("%+v", item)
+	return item, nil
 }
 
 // Fix repairs deprecated usage of language-specific rules in f. This is
