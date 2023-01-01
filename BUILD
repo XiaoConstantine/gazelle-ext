@@ -15,8 +15,9 @@ go_library(
         "@bazel_gazelle//repo:go_default_library",
         "@bazel_gazelle//resolve:go_default_library",
         "@bazel_gazelle//rule:go_default_library",
-        "@com_github_smacker_go_tree_sitter//:go_default_library",
-        "@com_github_smacker_go_tree_sitter//java:go_default_library",
+        "@com_github_smacker_go_tree_sitter//:go-tree-sitter",
+        "@com_github_smacker_go_tree_sitter//java",
+        "@org_golang_x_exp//maps",
     ],
 )
 
@@ -72,5 +73,16 @@ java_library(
         "import org.elasticsearch.client.RestClient;",
         "import org.slf4j.Logger;",
         "import org.slf4j.LoggerFactory;",
+    ],
+)
+
+java_library(
+    name = "quality",
+    srcs = ["/Users/xiao/development/github.com/XiaoConstantine/gazelle-ext/test.java"],
+    deps = [
+        " java.io",
+        " org.apache.lucene.benchmark.quality.utils",
+        " org.apache.lucene.index",
+        " org.apache.lucene.search",
     ],
 )

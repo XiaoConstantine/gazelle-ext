@@ -19,6 +19,7 @@ import (
 	"github.com/bazelbuild/bazel-gazelle/rule"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/java"
+	"golang.org/x/exp/maps"
 )
 
 const (
@@ -229,38 +230,71 @@ func (e *Extension) Loads() []rule.LoadInfo {
 //go:embed analysis.scm
 var analysisQuery []byte
 
+type javaPackageSummary struct {
+	full_pkg string
+	deps     map[string][]string
+	files    []string
+	pkg      string
+}
+
 func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateResult {
 	log.Println("calling generateRules")
 
 	// workspaceRoot := args.Config.RepoRoot
 	// log.Printf("%#v", workspaceRoot)
-
-	var rules []*rule.Rule
-	var imports []interface{}
-
+	// summarize out of all java files
+	// group by full package
+	// a.b.c: {
+	//	  files: [d, e, f],
+	//
+	// }
+	m := make(map[string]*javaPackageSummary)
 	for _, f := range args.RegularFiles {
 		if !javaSourceFile(f) {
 			continue
 		}
-
-		name := strings.TrimSuffix(f, fileType)
-		r := rule.NewRule("java_library", name)
-
-		r.SetAttr("srcs", []string{f})
 		fullPath := filepath.Join(args.Dir, f)
 		log.Printf("%#v", fullPath)
 		loads, err := e.getTreeSitterJavaFileLoads(fullPath)
+		if v, ok := m[loads.full_pkg]; ok {
+			maps.Copy(m[loads.full_pkg].deps, v.deps)
+			m[loads.full_pkg].files = append(m[loads.full_pkg].files, loads.file_name)
+		} else {
+			m[loads.full_pkg] = &javaPackageSummary{
+				full_pkg: loads.full_pkg,
+				deps:     loads.deps,
+				files:    []string{loads.file_name},
+				pkg:      loads.pkg,
+			}
+		}
 		if err != nil {
 			log.Printf("%s: contains syntax errors: %v", fullPath, err)
 		}
-		rules = append(rules, r)
-		imports = append(imports, loads)
-
 	}
+
+	rules, imports := generate(m)
+
 	return language.GenerateResult{
 		Gen:     rules,
 		Imports: imports,
 	}
+}
+
+func generate(m map[string]*javaPackageSummary) (rules []*rule.Rule, imports []interface{}) {
+	var a []*rule.Rule
+	var b []interface{}
+
+	for key, summary := range m {
+		log.Println(key)
+		r := rule.NewRule("java_library", summary.pkg)
+		r.SetAttr("srcs", summary.files)
+
+		d := maps.Keys(summary.deps)
+		a = append(a, r)
+		b = append(b, d)
+	}
+
+	return a, b
 }
 
 func javaSourceFile(f string) bool {
@@ -268,9 +302,11 @@ func javaSourceFile(f string) bool {
 }
 
 type javaFile struct {
-	pkg      string
-	deps     map[string][]string
-	full_pkg string
+	// is this needed?
+	pkg       string
+	deps      map[string][]string
+	full_pkg  string
+	file_name string
 }
 
 // The query will provide us information (if parse succeed) as following format:
@@ -331,11 +367,12 @@ func (e *Extension) getTreeSitterJavaFileLoads(path string) (*javaFile, error) {
 	}
 
 	item := &javaFile{
-		pkg:      pkg,
-		full_pkg: full_pkg,
-		deps:     deps,
+		pkg:       pkg,
+		full_pkg:  full_pkg,
+		deps:      deps,
+		file_name: path,
 	}
-	log.Printf("%+v", item)
+	log.Printf("%#v", item)
 	return item, nil
 }
 

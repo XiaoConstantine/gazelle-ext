@@ -214,8 +214,8 @@ def deps():
     go_repository(
         name = "org_golang_x_exp",
         importpath = "golang.org/x/exp",
-        sum = "h1:c2HOrn5iMezYjSlGPncknSEr/8x5LELb/ilJbXi9DEA=",
-        version = "v0.0.0-20190121172915-509febef88a4",
+        sum = "h1:m9O6OTJ627iFnN2JIWfdqlZCzneRO6EEBsHXI25P8ws=",
+        version = "v0.0.0-20221230185412-738e83a70c30",
     )
     go_repository(
         name = "org_golang_x_lint",
