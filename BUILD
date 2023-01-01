@@ -60,14 +60,3 @@ go_test(
         "@bazel_gazelle//resolve:go_default_library",
     ],
 )
-
-java_library(
-    name = "quality",
-    srcs = [""],
-    deps = [
-        "java.io",
-        "org.apache.lucene.benchmark.quality.utils",
-        "org.apache.lucene.index",
-        "org.apache.lucene.search",
-    ],
-)
