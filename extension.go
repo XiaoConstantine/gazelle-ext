@@ -285,16 +285,25 @@ func generate(m map[string]*javaPackageSummary) (rules []*rule.Rule, imports []i
 	var b []interface{}
 
 	for key, summary := range m {
-		log.Println(key)
 		r := rule.NewRule("java_library", summary.pkg)
-		r.SetAttr("srcs", summary.files)
+		r.SetAttr("srcs", normalizeSrcs(summary.files, key))
 
 		d := maps.Keys(summary.deps)
 		a = append(a, r)
 		b = append(b, d)
 	}
-
 	return a, b
+}
+
+func normalizeSrcs(srcs []string, full_pkg string) []string {
+	ret := make([]string, len(srcs))
+	for _, v := range srcs {
+		log.Printf("key: %s, v: %s", full_pkg, v)
+		if strings.HasPrefix(v, full_pkg) {
+			ret = append(ret, v[len(full_pkg):])
+		}
+	}
+	return ret
 }
 
 func javaSourceFile(f string) bool {
@@ -350,9 +359,9 @@ func (e *Extension) getTreeSitterJavaFileLoads(path string) (*javaFile, error) {
 		for _, c := range m.Captures {
 			switch q.CaptureNameForId(c.Index) {
 			case full_package:
-				full_pkg = c.Node.Content(f)[7:]
+				full_pkg = normalizeStr(c.Node.Content(f)[7:])
 			case full_import:
-				imports = append(imports, strings.TrimSuffix(c.Node.Content(f)[6:], ";"))
+				imports = append(imports, normalizeStr(c.Node.Content(f)[6:]))
 			case class_name:
 				clsName := c.Node.Content(f)
 				if len(imports) > 0 && strings.HasSuffix(imports[len(imports)-1], clsName) {
@@ -361,7 +370,7 @@ func (e *Extension) getTreeSitterJavaFileLoads(path string) (*javaFile, error) {
 					deps[key] = append(deps[key], clsName)
 				}
 			case local_package:
-				pkg = c.Node.Content(f)
+				pkg = strings.TrimSpace(c.Node.Content(f))
 			}
 		}
 	}
@@ -374,6 +383,10 @@ func (e *Extension) getTreeSitterJavaFileLoads(path string) (*javaFile, error) {
 	}
 	log.Printf("%#v", item)
 	return item, nil
+}
+
+func normalizeStr(s string) string {
+	return strings.TrimSuffix(strings.TrimSpace(s), ";")
 }
 
 // Fix repairs deprecated usage of language-specific rules in f. This is

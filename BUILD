@@ -62,27 +62,12 @@ go_test(
 )
 
 java_library(
-    name = "test",
-    srcs = ["test.java"],
-    deps = [
-        "import com.google.inject.Provides;",
-        "import com.google.inject.Singleton;",
-        "import com.google.inject.name.Named;",
-        "import com.twitter.util.Duration;",
-        "import com.twitter.util.Try;",
-        "import org.elasticsearch.client.RestClient;",
-        "import org.slf4j.Logger;",
-        "import org.slf4j.LoggerFactory;",
-    ],
-)
-
-java_library(
     name = "quality",
-    srcs = ["/Users/xiao/development/github.com/XiaoConstantine/gazelle-ext/test.java"],
+    srcs = [""],
     deps = [
-        " java.io",
-        " org.apache.lucene.benchmark.quality.utils",
-        " org.apache.lucene.index",
-        " org.apache.lucene.search",
+        "java.io",
+        "org.apache.lucene.benchmark.quality.utils",
+        "org.apache.lucene.index",
+        "org.apache.lucene.search",
     ],
 )
