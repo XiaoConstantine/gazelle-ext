@@ -3,8 +3,10 @@ package gazelle_ext
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -85,10 +87,6 @@ func (e *Extension) Name() string {
 	return languageName
 }
 
-func javaLibrary(name string) bool {
-	return name == "java_library"
-}
-
 // Imports returns a list of ImportSpecs that can be used to import the rule
 // r. This is used to populate RuleIndex.
 //
@@ -100,7 +98,7 @@ func (e *Extension) Imports(c *config.Config, r *rule.Rule, f *rule.File) []reso
 		return nil
 	}
 	var out []resolve.ImportSpec
-	log.Printf("%#v", r)
+	log.Printf("%+v", r)
 
 	if pkgs := r.PrivateAttr(packagesKey); pkgs != nil {
 		for _, pkg := range pkgs.([]string) {
@@ -128,8 +126,8 @@ func (e *Extension) Embeds(r *rule.Rule, from label.Label) []label.Label {
 // the appropriate language-specific equivalent) for each import according to
 // language-specific rules and heuristics.
 func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.RemoteCache, r *rule.Rule, imports interface{}, from label.Label) {
-	log.Println("calling resolve")
 	imps := imports.([]string)
+
 	r.DelAttr("deps")
 	if len(imps) == 0 {
 		log.Println("empty imports")
@@ -139,7 +137,7 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 
 	for _, imp := range imps {
 		// Skip built-in dependencies
-		if strings.HasPrefix(imp, "import java.") {
+		if builtInDep(imp) {
 			continue
 		}
 
@@ -150,18 +148,11 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 		}
 
 		impLabel = impLabel.Abs(from.Repo, from.Pkg)
-		log.Printf("%v", impLabel)
-
-		if impLabel.Repo != "" || !c.IndexLibraries {
-			// This is a dependency that is external to the current repo, or indexing
-			// is disabled so take a guess at what hte target name should be.
-			deps = append(deps, strings.TrimSuffix(imp, fileType))
-			continue
-		}
+		log.Printf("label: %v", impLabel)
 
 		res := resolve.ImportSpec{
 			Lang: languageName,
-			Imp:  impLabel.String(),
+			Imp:  imp,
 		}
 		matches := ix.FindRulesByImportWithConfig(c, res, languageName)
 
@@ -179,6 +170,15 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 			depLabel = depLabel.Rel(from.Repo, from.Pkg)
 			deps = append(deps, depLabel.String())
 		}
+
+		// Resolve based on maven_install.json
+		loaded, err := loadMavenInstall(fmt.Sprintf("%s/maven_install.json", c.RepoRoot))
+		if !loaded || err != nil {
+			log.Panicf("missing maven install")
+		}
+
+		log.Printf("%+v", externalDeps)
+
 	}
 	log.Printf("Deps: %#v", deps)
 	sort.Strings(deps)
@@ -186,17 +186,6 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 		r.SetAttr("deps", deps)
 	}
 
-}
-
-var kinds = map[string]rule.KindInfo{
-	"java_library": {
-		NonEmptyAttrs:  map[string]bool{"srcs": true, "deps": true},
-		MergeableAttrs: map[string]bool{"srcs": true},
-		ResolveAttrs: map[string]bool{
-			"deps":         true,
-			"runtime_deps": true,
-		},
-	},
 }
 
 // Kinds returns a map of maps rule names (kinds) and information on how to
@@ -226,22 +215,11 @@ func (e *Extension) Loads() []rule.LoadInfo {
 //
 // Any non-fatal errors this function encounters should be logged using
 // log.Print.
-
-//go:embed analysis.scm
-var analysisQuery []byte
-
-type javaPackageSummary struct {
-	full_pkg string
-	deps     map[string][]string
-	files    []string
-	pkg      string
-}
-
 func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateResult {
 	log.Println("calling generateRules")
 
-	// workspaceRoot := args.Config.RepoRoot
-	// log.Printf("%#v", workspaceRoot)
+	workspaceRoot := args.Config.RepoRoot
+	log.Printf("%#v", workspaceRoot)
 	// summarize out of all java files
 	// group by full package
 	// a.b.c: {
@@ -254,7 +232,7 @@ func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateR
 			continue
 		}
 		fullPath := filepath.Join(args.Dir, f)
-		log.Printf("%#v", fullPath)
+		// log.Printf("%#v", fullPath)
 		loads, err := e.getTreeSitterJavaFileLoads(fullPath)
 		if v, ok := m[loads.full_pkg]; ok {
 			maps.Copy(m[loads.full_pkg].deps, v.deps)
@@ -272,7 +250,7 @@ func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateR
 		}
 	}
 
-	rules, imports := generate(m)
+	rules, imports := generate(m, args.Dir)
 
 	return language.GenerateResult{
 		Gen:     rules,
@@ -280,13 +258,92 @@ func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateR
 	}
 }
 
-func generate(m map[string]*javaPackageSummary) (rules []*rule.Rule, imports []interface{}) {
+// Fix repairs deprecated usage of language-specific rules in f. This is
+// called before the file is indexed. Unless c.ShouldFix is true, fixes
+// that delete or rename rules should not be performed.
+func (e *Extension) Fix(c *config.Config, f *rule.File) {
+}
+
+//go:embed analysis.scm
+var analysisQuery []byte
+
+var kinds = map[string]rule.KindInfo{
+	"java_library": {
+		NonEmptyAttrs:  map[string]bool{"srcs": true, "deps": true},
+		MergeableAttrs: map[string]bool{"srcs": true},
+		ResolveAttrs: map[string]bool{
+			"deps":         true,
+			"runtime_deps": true,
+		},
+	},
+}
+
+var externalDeps map[string]string = make(map[string]string)
+
+var builtInDepPrefixes = []string{
+	"com.sun.management.",
+	"com.sun.net.httpserver.",
+	"java.",
+	"javax.annotation.security.",
+	"javax.crypto.",
+	"javax.management.",
+	"javax.naming.",
+	"javax.net.",
+	"javax.security.",
+	"javax.xml.",
+	"jdk.",
+	"org.w3c.dom.",
+	"org.xml.sax.",
+	"sun.",
+}
+
+type javaPackageSummary struct {
+	full_pkg string
+	deps     map[string][]string
+	files    []string
+	pkg      string
+}
+
+type javaFile struct {
+	// is this needed?
+	pkg       string
+	deps      map[string][]string
+	full_pkg  string
+	file_name string
+}
+
+type maven_install struct {
+	Tree dependencyTree `json:"dependency_tree"`
+}
+
+type dependencyTree struct {
+	ConflictResolution map[string]string `json:"conflict_resolution"`
+	Dependencies       []dep             `json:"dependencies"`
+	Version            string            `json:"version"`
+}
+
+type dep struct {
+	Coord              string   `json:"coord"`
+	Dependencies       []string `json:"dependencies"`
+	DirectDependencies []string `json:"directDependencies"`
+	File               string   `json:"file"`
+	MirrorUrls         []string `json:"mirror_urls,omitempty"`
+	Packages           []string `json:"packages"`
+	Sha256             string   `json:"sha256,omitempty"`
+	URL                string   `json:"url,omitempty"`
+	Exclusions         []string `json:"exclusions,omitempty"`
+}
+
+func javaLibrary(name string) bool {
+	return name == "java_library"
+}
+
+func generate(m map[string]*javaPackageSummary, rel string) (rules []*rule.Rule, imports []interface{}) {
 	var a []*rule.Rule
 	var b []interface{}
-
-	for key, summary := range m {
+	for _, summary := range m {
 		r := rule.NewRule("java_library", summary.pkg)
-		r.SetAttr("srcs", normalizeSrcs(summary.files, key))
+		r.SetAttr("srcs", normalizeSrcs(summary.files, rel))
 
 		d := maps.Keys(summary.deps)
 		a = append(a, r)
@@ -298,24 +355,16 @@ func generate(m map[string]*javaPackageSummary) (rules []*rule.Rule, imports []i
 func normalizeSrcs(srcs []string, full_pkg string) []string {
 	ret := make([]string, len(srcs))
 	for _, v := range srcs {
-		log.Printf("key: %s, v: %s", full_pkg, v)
 		if strings.HasPrefix(v, full_pkg) {
-			ret = append(ret, v[len(full_pkg):])
+			ret = append(ret, v[len(full_pkg)+1:])
 		}
 	}
+	log.Printf("normalized srcs: %+v", ret)
 	return ret
 }
 
 func javaSourceFile(f string) bool {
 	return strings.HasSuffix(f, fileType)
-}
-
-type javaFile struct {
-	// is this needed?
-	pkg       string
-	deps      map[string][]string
-	full_pkg  string
-	file_name string
 }
 
 // The query will provide us information (if parse succeed) as following format:
@@ -381,7 +430,7 @@ func (e *Extension) getTreeSitterJavaFileLoads(path string) (*javaFile, error) {
 		deps:      deps,
 		file_name: path,
 	}
-	log.Printf("%#v", item)
+	// log.Printf("%#v", item)
 	return item, nil
 }
 
@@ -389,8 +438,35 @@ func normalizeStr(s string) string {
 	return strings.TrimSuffix(strings.TrimSpace(s), ";")
 }
 
-// Fix repairs deprecated usage of language-specific rules in f. This is
-// called before the file is indexed. Unless c.ShouldFix is true, fixes
-// that delete or rename rules should not be performed.
-func (e *Extension) Fix(c *config.Config, f *rule.File) {
+func builtInDep(pkg string) bool {
+	for _, prefix := range builtInDepPrefixes {
+		if strings.HasPrefix(pkg, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func loadMavenInstall(fn string) (bool, error) {
+	if len(externalDeps) != 0 {
+		return true, nil
+	}
+	f, err := os.Open(fn)
+	if err != nil {
+		log.Panicf("%v", err)
+	}
+	defer f.Close()
+
+	var ret maven_install
+
+	if err := json.NewDecoder(f).Decode(&ret); err != nil {
+		return false, err
+	}
+	for _, item := range ret.Tree.Dependencies {
+		parts := strings.Split(item.Coord, ":")
+		dep := fmt.Sprintf("@maven//:%s_%s", strings.ReplaceAll(parts[0], ".", "_"),
+			strings.ReplaceAll(parts[1], ".", "_"))
+		externalDeps[dep] = parts[len(parts)-1]
+	}
+	return true, nil
 }
