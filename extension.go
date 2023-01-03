@@ -177,6 +177,13 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 			log.Panicf("missing maven install")
 		}
 
+		for k, v := range externalDeps {
+			log.Printf("import: %v, deps: %s", imp, k)
+			if strings.HasPrefix(k, imp) {
+				deps = append(deps, v)
+			}
+		}
+
 		log.Printf("%+v", externalDeps)
 
 	}
@@ -466,7 +473,7 @@ func loadMavenInstall(fn string) (bool, error) {
 		parts := strings.Split(item.Coord, ":")
 		dep := fmt.Sprintf("@maven//:%s_%s", strings.ReplaceAll(parts[0], ".", "_"),
 			strings.ReplaceAll(parts[1], ".", "_"))
-		externalDeps[dep] = parts[len(parts)-1]
+		externalDeps[item.Coord] = dep
 	}
 	return true, nil
 }
