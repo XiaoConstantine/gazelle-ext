@@ -93,7 +93,7 @@ func (e *Extension) Name() string {
 // If nil is returned, the rule will not be indexed. If any non-nil slice is
 // returned, including an empty slice, the rule will be indexed.
 func (e *Extension) Imports(c *config.Config, r *rule.Rule, f *rule.File) []resolve.ImportSpec {
-	log.Println("calling imports")
+	// log.Println("calling imports")
 	if !javaLibrary(r.Kind()) {
 		return nil
 	}
@@ -106,7 +106,7 @@ func (e *Extension) Imports(c *config.Config, r *rule.Rule, f *rule.File) []reso
 		}
 
 	}
-	log.Printf("Out %#v", out)
+	// log.Printf("Out %#v", out)
 	return out
 }
 
@@ -128,6 +128,7 @@ func (e *Extension) Embeds(r *rule.Rule, from label.Label) []label.Label {
 func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.RemoteCache, r *rule.Rule, imports interface{}, from label.Label) {
 	imps := imports.([]string)
 
+	log.Printf("imports: %+v", imports)
 	r.DelAttr("deps")
 	if len(imps) == 0 {
 		log.Println("empty imports")
@@ -147,14 +148,26 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 			continue
 		}
 
+		log.Printf("repo: %s, pkg: %s", from.Repo, from.Pkg)
 		impLabel = impLabel.Abs(from.Repo, from.Pkg)
-		log.Printf("label: %v", impLabel)
+		log.Printf("label: %s", impLabel)
 
+		pkg_parts := strings.Split(impLabel.Pkg, ".")
+
+		log.Printf("label: %+v", pkg_parts)
 		res := resolve.ImportSpec{
 			Lang: languageName,
-			Imp:  imp,
+			Imp:  pkg_parts[len(pkg_parts)-1],
 		}
+
+		// override
+		if l, ok := resolve.FindRuleWithOverride(c, res, languageName); ok {
+			deps = append(deps, l.String())
+		}
+
 		matches := ix.FindRulesByImportWithConfig(c, res, languageName)
+
+		log.Printf("find rules by import: %+v", matches)
 
 		if len(matches) == 0 {
 			log.Printf(
@@ -171,6 +184,10 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 			deps = append(deps, depLabel.String())
 		}
 
+		if !c.IndexLibraries {
+			log.Printf("!c.indexLib: %+v", deps)
+		}
+
 		// Resolve based on maven_install.json
 		loaded, err := loadMavenInstall(fmt.Sprintf("%s/maven_install.json", c.RepoRoot))
 		if !loaded || err != nil {
@@ -178,13 +195,13 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 		}
 
 		for k, v := range externalDeps {
-			log.Printf("import: %v, deps: %s", imp, k)
+			// log.Printf("import: %v, deps: %s", imp, k)
 			if strings.HasPrefix(k, imp) {
 				deps = append(deps, v)
 			}
 		}
 
-		log.Printf("%+v", externalDeps)
+		// log.Printf("%+v", externalDeps)
 
 	}
 	log.Printf("Deps: %#v", deps)
@@ -192,7 +209,6 @@ func (e *Extension) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.Re
 	if len(deps) > 0 {
 		r.SetAttr("deps", deps)
 	}
-
 }
 
 // Kinds returns a map of maps rule names (kinds) and information on how to
@@ -223,7 +239,7 @@ func (e *Extension) Loads() []rule.LoadInfo {
 // Any non-fatal errors this function encounters should be logged using
 // log.Print.
 func (e *Extension) GenerateRules(args language.GenerateArgs) language.GenerateResult {
-	log.Println("calling generateRules")
+	log.Printf("calling generateRules on")
 
 	workspaceRoot := args.Config.RepoRoot
 	log.Printf("%#v", workspaceRoot)
@@ -360,10 +376,12 @@ func generate(m map[string]*javaPackageSummary, rel string) (rules []*rule.Rule,
 }
 
 func normalizeSrcs(srcs []string, full_pkg string) []string {
-	ret := make([]string, len(srcs))
+	var ret []string
 	for _, v := range srcs {
 		if strings.HasPrefix(v, full_pkg) {
-			ret = append(ret, v[len(full_pkg)+1:])
+			if len(v[len(full_pkg)+1:]) > 0 {
+				ret = append(ret, v[len(full_pkg)+1:])
+			}
 		}
 	}
 	log.Printf("normalized srcs: %+v", ret)
@@ -380,10 +398,10 @@ func javaSourceFile(f string) bool {
 // import a.(*)
 // the parsing result looks like:
 // { pkg: c
-//   full_pkg: a.b.c
-//   deps: {a.b: [c]}
-//  }
 //
+//	 full_pkg: a.b.c
+//	 deps: {a.b: [c]}
+//	}
 func (e *Extension) getTreeSitterJavaFileLoads(path string) (*javaFile, error) {
 	f, err := os.ReadFile(path)
 
@@ -477,3 +495,7 @@ func loadMavenInstall(fn string) (bool, error) {
 	}
 	return true, nil
 }
+
+// func ResolveJava(c *config.Config, ix *resolve.RuleIndex, rc *repo.RemoteCache, imp string, from label.Label) (label.Label, error) {
+
+// }
